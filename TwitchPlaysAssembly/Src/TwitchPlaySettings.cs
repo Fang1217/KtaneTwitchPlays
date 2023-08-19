@@ -74,6 +74,8 @@ public class TwitchPlaySettingsData
 	public bool PacingEventsOnRunBomb = true;
 	public bool AllowSheetDisabledModules = true;
 
+	public int BombFlipCooldown = 5;
+
 	public bool EnableTimeModeForEveryone = false;
 	public float TimeModeStartingTime = 5;
 	public float TimeModeStartingMultiplier = 9.0f;
@@ -295,27 +297,31 @@ public class TwitchPlaySettingsData
 			DisplayName = "Light Hard Mix",
 			Pools = new List<DistributionPool> {
 				new DistributionPool(0.7f, "ALL_SOLVABLE"),
-				new DistributionPool(0.3f, 10, 240, "SCORE, > 14, <= 25")
+				new DistributionPool(0.2f, 10, 240, "SCORE, > 14, <= 25"),
+				new DistributionPool(0.1f, 10, 240, "SCORE, > 14")
 			}
 		}},
 		{ "hard", new ModuleDistributions {
 			DisplayName = "Hard Mix",
 			Pools = new List<DistributionPool> {
 				new DistributionPool(0.5f, "ALL_SOLVABLE"),
-				new DistributionPool(0.5f, 10, 240, "SCORE, > 14, <= 25")
+				new DistributionPool(0.3f, 10, 240, "SCORE, > 14, <= 25"),
+				new DistributionPool(0.2f, 10, 240, "SCORE, > 14")
 			}
 		}},
 		{ "heavyhard", new ModuleDistributions {
 			DisplayName = "Heavy Hard Mix",
 			Pools = new List<DistributionPool> {
-				new DistributionPool(0.8f, "ALL_SOLVABLE"),
-				new DistributionPool(0.2f, 10, 240, "SCORE, > 14, <= 25")
+				new DistributionPool(0.2f, "ALL_SOLVABLE"),
+				new DistributionPool(0.5f, 10, 240, "SCORE, > 14, <= 25"),
+				new DistributionPool(0.3f, 10, 240, "SCORE, > 14")
 			}
 		}},
 		{ "allhard", new ModuleDistributions {
 			DisplayName = "All Hard",
 			Pools = new List<DistributionPool> {
-				new DistributionPool(1.0f, 10, 240, "SCORE, > 14, <= 25")
+				new DistributionPool(0.6f, 10, 240, "SCORE, > 14, <= 25"),
+				new DistributionPool(0.4f, 10, 240, "SCORE, > 14")
 			}
 		}},
 		{ "variety", new ModuleDistributions {
@@ -345,7 +351,9 @@ public class TwitchPlaySettingsData
 	public string HoldableCommandError = "@{1}, Holdable !{0} responded with the following error: {2}";
 
 	public string AwardSolve = "VoteYea {1} solved Module {0} ({3})! +{2} points. VoteYea";
+	public string AwardSolveNoPoints = "VoteYea {1} solved Module {0} ({2})! VoteYea";
 	public string AwardVsSolve = "VoteYea {1} solved Module {0} ({3})! +{2} points. -{4} HP from {5}. VoteYea";
+	public string AwardVsSolveNoPoints = "VoteYea {1} solved Module {0} ({2})! -{3} HP from {4}. VoteYea";
 	public string AwardStrike = "VoteNay Module {0} ({6}) got {1} strike{2}! {7} points from {4}{5} VoteNay";
 	public string AwardVsStrike = "VoteNay Module {0} ({6}) got {1} strike{2}! -{7} HP from {4}. {8} points from {9}{5} VoteNay";
 	public string AwardHoldableStrike = "VoteNay Holdable !{0} got {1} strike{2}! {3} points from {4}{5} VoteNay";
@@ -566,7 +574,9 @@ public class TwitchPlaySettingsData
 		valid &= ValidateString(ref HoldableCommandError, data.HoldableCommandError, 3);
 
 		valid &= ValidateString(ref AwardSolve, data.AwardSolve, 4);
+		valid &= ValidateString(ref AwardSolveNoPoints, data.AwardSolveNoPoints, 3);
 		valid &= ValidateString(ref AwardVsSolve, data.AwardVsSolve, 6);
+		valid &= ValidateString(ref AwardVsSolveNoPoints, data.AwardVsSolveNoPoints, 5);
 		valid &= ValidateString(ref AwardStrike, data.AwardStrike, 8);
 		valid &= ValidateString(ref AwardVsStrike, data.AwardVsStrike, 10);
 		valid &= ValidateString(ref AwardHoldableStrike, data.AwardHoldableStrike, 6);

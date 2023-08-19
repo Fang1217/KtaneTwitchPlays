@@ -51,6 +51,9 @@ public class TwitchBomb : MonoBehaviour
 	private string _edgeworkCode;
 
 	private string _bombName;
+
+	private bool _flipEnabled = true;
+
 	public string BombName
 	{
 		get => _bombName;
@@ -696,6 +699,9 @@ public class TwitchBomb : MonoBehaviour
 
 	public IEnumerator TurnBomb()
 	{
+		if (TwitchPlaySettings.data.BombFlipCooldown > float.Epsilon && !_flipEnabled)
+			yield break;
+
 		var gameRoomTurnBomb = GameRoom.Instance?.BombCommanderTurnBomb(Bomb);
 		if (gameRoomTurnBomb != null && gameRoomTurnBomb.MoveNext() && gameRoomTurnBomb.Current is bool continueInvoke)
 		{
@@ -709,6 +715,12 @@ public class TwitchBomb : MonoBehaviour
 		var holdBombCoroutine = HoldBomb(KTInputManager.Instance.SelectableManager.GetActiveFace() != FaceEnum.Front);
 		while (holdBombCoroutine.MoveNext())
 			yield return holdBombCoroutine.Current;
+
+		if (TwitchPlaySettings.data.BombFlipCooldown > float.Epsilon)
+		{
+			_flipEnabled = false;
+			StartCoroutine(new WaitForSeconds(TwitchPlaySettings.data.BombFlipCooldown).Yield(() => _flipEnabled = true)); //don't wait on this coroutine to finish the current one
+		}
 	}
 
 	public IEnumerator KeepAlive()

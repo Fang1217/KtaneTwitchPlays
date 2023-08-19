@@ -71,15 +71,14 @@ public abstract class ComponentSolver
 			try
 			{
 				moved = subcoroutine.MoveNext();
-				if (moved && (ModInfo.DoesTheRightThing || ModInfo.builtIntoTwitchPlays))
+				if (moved && (!ModInfo.CompatibilityMode || ModInfo.builtIntoTwitchPlays))
 				{
 					//Handle No-focus API commands. In order to focus the module, the first thing yielded cannot be one of the things handled here, as the solver will yield break if
 					//it is one of these API commands returned.
 					switch (subcoroutine.Current)
 					{
 						case string currentString:
-							if (SendToTwitchChat(currentString, userNickName) ==
-								SendToTwitchChatResponse.InstantResponse)
+							if (SendToTwitchChat(currentString, userNickName) <= SendToTwitchChatResponse.HandledHaltIfUnfocused)
 								yield break;
 							break;
 					}
@@ -97,10 +96,12 @@ public abstract class ComponentSolver
 
 		if (Solved != solved || _beforeStrikeCount != StrikeCount)
 		{
-			IRCConnection.SendMessageFormat("Please submit an issue at https://github.com/samfundev/KtaneTwitchPlays/issues regarding module !{0} ({1}) attempting to solve / strike prematurely.", Module.Code, Module.HeaderText);
+			IRCConnection.SendMessageFormat("Warning: Module !{0} ({1}) attempted to {2} in response to a command before Twitch Plays could focus on it. Compatibility mode has been enabled for this module.",
+				Module.Code, Module.HeaderText, (Solved != solved) ? "solve" : "strike");
+
 			if (ModInfo != null)
 			{
-				ModInfo.DoesTheRightThing = false;
+				ModInfo.CompatibilityMode = true;
 				ModuleData.DataHasChanged = true;
 				ModuleData.WriteDataToFile();
 			}
@@ -147,6 +148,7 @@ public abstract class ComponentSolver
 		bool hideCamera = false;
 		bool exceptionThrown = false;
 		bool trycancelsequence = false;
+		SendToTwitchChatResponse chatResponse;
 
 		while ((_beforeStrikeCount == StrikeCount && !Solved || _disableOnStrike || TwitchPlaySettings.data.AnarchyMode) && !Detonated)
 		{
@@ -219,12 +221,11 @@ public abstract class ComponentSolver
 					}
 				}
 				// Commands that allow messages to be sent to the chat.
-				else if (SendToTwitchChat(currentString, userNickName) != SendToTwitchChatResponse.NotHandled)
+				else if ((chatResponse = SendToTwitchChat(currentString, userNickName)) != SendToTwitchChatResponse.NotHandled)
 				{
-					if (currentString.StartsWith("antitroll") && !TwitchPlaySettings.data.EnableTrollCommands &&
-						!TwitchPlaySettings.data.AnarchyMode)
-						break;
-					//handled
+					if (chatResponse == SendToTwitchChatResponse.HandledMustHalt)
+						break; // Antitroll, requested stop with "sendtochat!h", etc.
+					// otherwise handled, continue
 				}
 				else if (currentString.StartsWith("add strike", StringComparison.InvariantCultureIgnoreCase))
 					OnStrike(null);
@@ -532,18 +533,30 @@ public abstract class ComponentSolver
 
 	protected enum SendToTwitchChatResponse
 	{
-		InstantResponse,
-		Handled,
+		HandledMustHalt,
+		HandledHaltIfUnfocused,
+		HandledContinue,
 		NotHandled
 	}
 
 	protected SendToTwitchChatResponse SendToTwitchChat(string message, string userNickName)
 	{
+		// Default behavior is to halt if the module is unfocused, as it has always been
+		SendToTwitchChatResponse instantResponseReturn = SendToTwitchChatResponse.HandledHaltIfUnfocused;
 		bool skipFormatting = false;
-		if (message.RegexMatch(out Match match2, @"^(\w+)(?:!f) (.+)$"))
+
+		// Catch the following flags (which can be combined):
+		// !f = Skip formatting
+		// !h = Execution must halt
+		if (message.RegexMatch(out Match match2, @"^(\w+)!([fh]+) (.+)$"))
 		{
-			skipFormatting = true;
-			message = match2.Groups[1].Value + " " + match2.Groups[2].Value;
+			string flagsList = match2.Groups[2].ToString().ToLowerInvariant();
+			if (flagsList.Contains('f'))
+				skipFormatting = true;
+			if (flagsList.Contains('h'))
+				instantResponseReturn = SendToTwitchChatResponse.HandledMustHalt;
+
+			message = match2.Groups[1].Value + " " + match2.Groups[3].Value;
 		}
 
 		if (!skipFormatting)
@@ -555,7 +568,7 @@ public abstract class ComponentSolver
 		if (message.RegexMatch(out Match match, @"^senddelayedmessage ([0-9]+(?:\.[0-9]+)?) (\S(?:\S|\s)*)$") && float.TryParse(match.Groups[1].Value, out float messageDelayTime))
 		{
 			Module.StartCoroutine(SendDelayedMessage(messageDelayTime, skipFormatting ? match.Groups[2].Value : string.Format(match.Groups[2].Value, userNickName, Module.Code)));
-			return SendToTwitchChatResponse.InstantResponse;
+			return instantResponseReturn;
 		}
 
 		if (!message.RegexMatch(out match, @"^(sendtochat|sendtochaterror|strikemessage|antitroll) +(\S(?:\S|\s)*)$")) return SendToTwitchChatResponse.NotHandled;
@@ -566,17 +579,21 @@ public abstract class ComponentSolver
 		{
 			case "sendtochat":
 				IRCConnection.SendMessage(chatMsg);
-				return SendToTwitchChatResponse.InstantResponse;
+				return instantResponseReturn;
 			case "antitroll":
-				if (TwitchPlaySettings.data.EnableTrollCommands || TwitchPlaySettings.data.AnarchyMode) return SendToTwitchChatResponse.Handled;
-				goto case "sendtochaterror";
+				if (TwitchPlaySettings.data.EnableTrollCommands || TwitchPlaySettings.data.AnarchyMode)
+					return SendToTwitchChatResponse.HandledContinue;
+
+				// Absolutely ensure that we don't continue executing troll commands.
+				Module.CommandError(userNickName, chatMsg);
+				return SendToTwitchChatResponse.HandledMustHalt;
 			case "sendtochaterror":
 				Module.CommandError(userNickName, chatMsg);
-				return SendToTwitchChatResponse.InstantResponse;
+				return instantResponseReturn;
 			case "strikemessage":
 				StrikeMessageConflict |= StrikeCount != _beforeStrikeCount && !string.IsNullOrEmpty(StrikeMessage) && !StrikeMessage.Equals(chatMsg);
 				StrikeMessage = chatMsg;
-				return SendToTwitchChatResponse.Handled;
+				return SendToTwitchChatResponse.HandledContinue;
 			default:
 				return SendToTwitchChatResponse.NotHandled;
 		}
@@ -985,15 +1002,26 @@ public abstract class ComponentSolver
 			if (OtherModes.VSModeOn)
 			{
 				if (!UnsupportedModule)
-					messageParts.Add(string.Format(TwitchPlaySettings.data.AwardVsSolve, Code, userNickName,
-						componentValue, headerText, HPDamage,
-						teamDamaged == OtherModes.Team.Evil ? "the evil team" : "the good team"));
-				else
+				{
+					if (componentValue != 0)
+						messageParts.Add(string.Format(TwitchPlaySettings.data.AwardVsSolve, Code, userNickName,
+							componentValue, headerText, HPDamage,
+							teamDamaged == OtherModes.Team.Evil ? "the evil team" : "the good team"));
+					else
+						messageParts.Add(string.Format(TwitchPlaySettings.data.AwardVsSolveNoPoints, Code, userNickName,
+							headerText, HPDamage,
+							teamDamaged == OtherModes.Team.Evil ? "the evil team" : "the good team"));
+				}
+				else if (componentValue != 0)
 					messageParts.Add(string.Format(TwitchPlaySettings.data.AwardSolve, Code, userNickName,
 						componentValue, headerText));
+				else
+					messageParts.Add(string.Format(TwitchPlaySettings.data.AwardSolveNoPoints, Code, userNickName, headerText));
 			}
-			else
+			else if (componentValue != 0)
 				messageParts.Add(string.Format(TwitchPlaySettings.data.AwardSolve, Code, userNickName, componentValue, headerText));
+			else
+				messageParts.Add(string.Format(TwitchPlaySettings.data.AwardSolveNoPoints, Code, userNickName, headerText));
 			string recordMessageTone = $"Module ID: {Code} | Player: {userNickName} | Module Name: {headerText} | Value: {componentValue}";
 			if (!OtherModes.TrainingModeOn) Leaderboard.Instance?.AddSolve(userNickName);
 			if (!UserAccess.HasAccess(userNickName, AccessLevel.NoPoints))
@@ -1121,14 +1149,14 @@ public abstract class ComponentSolver
 		Leaderboard.Instance?.AddScore(userNickName, pointsAwarded);
 		if (!OtherModes.VSModeOn)
 			messageParts.Add(string.Format(TwitchPlaySettings.data.AwardPPA, userNickName,
-				pointsAwarded > 0 ? "awarded" : "deducted", pointsAwarded, Math.Abs(pointsAwarded) > 1 ? "s" : "",
+				pointsAwarded > 0 ? "awarded" : "deducted", Math.Abs(pointsAwarded), Math.Abs(pointsAwarded) > 1 ? "s" : "",
 				Code, ModInfo.moduleDisplayName, pointsAwarded > 0 ? TwitchPlaySettings.data.PosPPAEmote : TwitchPlaySettings.data.NegPPAEmote));
 		else
 		{
 			CalculateVSHP(userNickName, pointsAwarded, out OtherModes.Team? teamDamaged, out int HPDamage);
 
 			messageParts.Add(string.Format(TwitchPlaySettings.data.AwardVSPPA, userNickName,
-				pointsAwarded > 0 ? "awarded" : "deducted", pointsAwarded, Math.Abs(pointsAwarded) > 1 ? "s" : "",
+				pointsAwarded > 0 ? "awarded" : "deducted", Math.Abs(pointsAwarded), Math.Abs(pointsAwarded) > 1 ? "s" : "",
 				Code, ModInfo.moduleDisplayName, HPDamage, teamDamaged == OtherModes.Team.Evil ? "the evil team" : "the good team",
 				pointsAwarded > 0 ? TwitchPlaySettings.data.PosPPAEmote : TwitchPlaySettings.data.NegPPAEmote));
 
